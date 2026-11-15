@@ -89,7 +89,9 @@ class Face:
         text = "".join(sorted(chars | {" "}))
         if text in self._cache:
             return self._cache[text]
-        tt = TTFont(io.BytesIO(self.raw))
+        # Keep the font's own timestamp, or every build embeds the time it
+        # ran and an unchanged picture comes out as different bytes.
+        tt = TTFont(io.BytesIO(self.raw), recalcTimestamp=False)
         opts = subset.Options()
         opts.flavor = "woff2"
         opts.layout_features = ["kern"]
