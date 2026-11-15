@@ -1,0 +1,55 @@
+{
+  "owner": "anirbanchakraborty-dev",
+  "repos": [
+    {
+      "name": "swara",
+      "display": "Swara",
+      "eyebrow": "LILYPOND IN NEOVIM",
+      "motif": "staff",
+      "files": ["README.md"],
+      "charts": ["speed"]
+    },
+    {
+      "name": "tree-sitter-lilypond",
+      "display": "tree-sitter-lilypond",
+      "eyebrow": "TREE-SITTER GRAMMAR",
+      "motif": "tree",
+      "files": ["README.md"],
+      "charts": ["compare"]
+    },
+    {
+      "name": "ACH-NEOVIM",
+      "display": "ACH-NEOVIM",
+      "eyebrow": "NEOVIM CONFIGURATION",
+      "motif": "editor",
+      "files": ["init.lua", "lazy-lock.json", "mason-lock.json", "docs/languages.md"],
+      "charts": ["coverage"]
+    },
+    {
+      "name": "homebrew-tap",
+      "display": "homebrew-tap",
+      "eyebrow": "HOMEBREW TAP",
+      "motif": "brew",
+      "files": ["Formula/swara.rb"],
+      "charts": []
+    },
+    {
+      "name": "ecc-book-lab",
+      "display": "ecc-book-lab",
+      "eyebrow": "BOOK COMPANION CODE",
+      "motif": "parity",
+      "data_bits": "1011001",
+      "flip": 2,
+      "files": ["hdl/parity/parity_gen.sv"],
+      "charts": []
+    },
+    {
+      "name": "Post-Mac-Setup",
+      "display": "Post-Mac-Setup",
+      "eyebrow": "MACOS BOOTSTRAP",
+      "motif": "setup",
+      "files": ["mac-setup.sh", "Brewfile", "README.md"],
+      "charts": ["packages"]
+    }
+  ]
+}

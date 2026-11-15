@@ -2,7 +2,13 @@
 #
 # build/build.py reads the public repositories, the contribution calendar and
 # the website's feed, writes the SVGs into dist/, and refreshes the generated
-# blocks of README.md. The snake is drawn from the same calendar. The SVGs are
+# blocks of README.md. The snake is drawn from the same calendar.
+#
+# build/repos.py draws the banners and charts that the other public
+# repositories' READMEs show, listed in build/repos.json. It reads each
+# repository's own files at HEAD, so a chart follows the table it is drawn from
+# by the next daily run, and it fails the run when a table no longer parses or
+# its figures disagree with each other. All the SVGs are
 # published as the only commit on the `output` branch, so the history of main
 # holds README changes alone and never a stack of regenerated images.
 #
@@ -44,6 +50,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python build/build.py
+
+      - name: Draw the other repositories' banners and charts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python build/repos.py
 
       - name: Draw the contribution snake
         uses: Platane/snk/svg-only@d8f6715049803e982ee5ff501b6b9b7d5deeb09b # v3.5.0
