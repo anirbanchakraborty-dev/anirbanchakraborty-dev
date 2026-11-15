@@ -235,6 +235,7 @@ query($login: String!) {
       nodes {
         name description url stargazerCount forkCount pushedAt isArchived
         primaryLanguage { name }
+        latestRelease { tagName }
         languages(first: 20, orderBy: {field: SIZE, direction: DESC}) { edges { size node { name } } }
         repositoryTopics(first: 10) { nodes { topic { name } } }
       }
@@ -586,6 +587,7 @@ def motif(name: str, col: str, faint: str) -> str:
 
 
 STAR = "M6 0.8l1.6 3.3 3.6.5-2.6 2.5.6 3.6L6 9l-3.2 1.7.6-3.6L.8 4.6l3.6-.5z"
+TAG = "M0.5 0.5h4.3l4.7 4.7-4.3 4.3L0.5 4.8z"
 FORK = ('<circle cx="3" cy="2.5" r="1.6"/><circle cx="9" cy="2.5" r="1.6"/><circle cx="6" cy="10" r="1.6"/>'
         '<path d="M3 4.1v1.2c0 1 .8 1.7 1.7 1.7h2.6c.9 0 1.7-.7 1.7-1.7V4.1M6 7v1.4"/>')
 
@@ -608,7 +610,8 @@ def project_card(mode: str, p: dict, repo: dict | None, rows: int = 3) -> Canvas
     topics = [t["topic"]["name"] for t in (repo or {}).get("repositoryTopics", {}).get("nodes", [])]
     lang = p.get("language") or ((repo or {}).get("primaryLanguage") or {}).get("name")
     extra = (rows - 3) * DESC_LH
-    cv = Canvas(420, 184 + extra, mode, name, f"{name}: {desc}")
+    release = ((repo or {}).get("latestRelease") or {}).get("tagName")
+    cv = Canvas(420, 184 + extra, mode, name, f"{name}: {desc}" + (f" Latest release {release}." if release else ""))
     c = cv.c
     acc = c[p["accent"]]
     card_frame(cv)
@@ -640,8 +643,19 @@ def project_card(mode: str, p: dict, repo: dict | None, rows: int = 3) -> Canvas
         x += 17 + width(fmt_int(repo["stargazerCount"]), 12) + 16
         cv.add(f'<g transform="translate({x} {y - 11})" fill="none" stroke="{c["text3"]}" stroke-width="1.2">{FORK}</g>')
         cv.put(x + 16, y, fmt_int(repo["forkCount"]), 12, "PS", 400, "text2")
+        x += 16 + width(fmt_int(repo["forkCount"]), 12) + 16
         pushed = dt.datetime.fromisoformat(repo["pushedAt"].replace("Z", "+00:00")).date()
-        cv.put(400, y, f"Updated {fmt_date(pushed)}", 12, "PS", 400, "text3", "end")
+        updated = f"Updated {fmt_date(pushed)}"
+        cv.put(400, y, updated, 12, "PS", 400, "text3", "end")
+        # The latest release as a pill, drawn only where it clears the date.
+        if release:
+            chip_w = 27 + width(release, 11, "PM", 500)
+            if x + chip_w <= 400 - width(updated, 12) - 12:
+                cv.add(f'<rect x="{x:g}" y="{y - 14:g}" width="{chip_w:g}" height="20" rx="10" fill="{acc}" '
+                       f'fill-opacity="0.12" stroke="{acc}" stroke-opacity="0.45"/>')
+                cv.add(f'<path transform="translate({x + 7:g} {y - 9:g})" d="{TAG}" fill="none" stroke="{acc}" '
+                       f'stroke-width="1.2" stroke-linejoin="round"/><circle cx="{x + 9.6:g}" cy="{y - 6.4:g}" r="0.9" fill="{acc}"/>')
+                cv.put(x + 20, y, release, 11, "PM", 500, "text2")
     return cv
 
 
@@ -1014,7 +1028,8 @@ def blocks(a: dict) -> dict[str, str]:
         r = a["by_name"].get(p["repo"])
         url = (r or {}).get("url") or f'https://github.com/{CFG["login"]}/{p["repo"]}'
         desc = (r or {}).get("description") or ""
-        alt = f'{p["repo"]}: {desc}'
+        tag = ((r or {}).get("latestRelease") or {}).get("tagName")
+        alt = f'{p["repo"]}: {desc}' + (f" Latest release {tag}." if tag else "")
         cards.append(f'<a href="{url}">{picture("project-" + p["repo"].lower(), alt, "49%")}</a>')
     out["projects"] = "\n".join(
         '<p align="center">\n' + "\n".join(cards[i:i + 2]) + "\n</p>" for i in range(0, len(cards), 2))
