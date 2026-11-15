@@ -50,6 +50,24 @@
       "motif": "setup",
       "files": ["mac-setup.sh", "Brewfile", "README.md"],
       "charts": ["packages"]
+    },
+    {
+      "name": "Yantra-CPU",
+      "display": "Yantra-CPU",
+      "eyebrow": "CPU DESIGN FROM FIRST PRINCIPLES",
+      "motif": "binary",
+      "description": "A 32-bit CPU designed and built from the ground up, as an educational, design-first project.",
+      "files": ["README.md", "DOCS/Module-0.md"],
+      "charts": []
+    },
+    {
+      "name": "datasciencecoursera",
+      "display": "datasciencecoursera",
+      "eyebrow": "COURSE REPOSITORY",
+      "motif": "markdown",
+      "description": "The course project of The Data Scientist's Toolbox, from Johns Hopkins on Coursera: a first round trip through Git and GitHub.",
+      "files": ["HelloWorld.md"],
+      "charts": []
     }
   ]
 }

@@ -14,19 +14,29 @@ stops the run before anything is published, and the previous pictures stay
 up. The failure names the file that moved.
 
     GITHUB_TOKEN=... python build/repos.py
+    GITHUB_TOKEN=... python build/repos.py --config other.json --out DIR
+
+--config reads another list of repositories in the same shape, and --out
+writes each one's pictures to DIR/<name>/banner-dark.svg and the like instead
+of dist/, for a README that carries its banner in its own repository. A list
+with "static": true leaves out the commit count, which would otherwise make
+a picture committed beside the code stale on every commit.
 """
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import json
 import os
 import re
 import sys
 import urllib.request
+from pathlib import Path
 
 import build as B
 
-CFG = json.loads((B.ROOT / "build" / "repos.json").read_text(encoding="utf-8"))
+DEFAULT_CFG = B.ROOT / "build" / "repos.json"
+CFG: dict = {}                      # set by main() from --config
 
 W, H = 860, 250                      # banner
 PX, PY, PW, PH = 470, 22, 360, 206   # the motif panel on its right
@@ -524,12 +534,498 @@ def motif_setup(cv: B.Canvas, spec, files) -> str:
     return f"The panel lists the {len(names)} sections mac-setup.sh runs, from {names[0]} to {names[-1]}."
 
 
+# --- Motifs drawn from a list's own data -----------------------------------
+# These take what is particular to one repository (a URL, a folder list, the
+# steps of a method) from its entry in the list, so this file names nothing
+# about the repository itself.
+
+
+def cycler(cv: B.Canvas, cls: str, n: int, secs: float):
+    """CSS that shows .{cls}0 to .{cls}{n-1} one at a time, one per beat.
+
+    With no animation running, the first one shows and the rest stay hidden.
+    """
+    cut = 100 / n
+    cv.css.append(f"@keyframes {cls}{{0%{{opacity:1}}{cut:.2f}%{{opacity:0}}100%{{opacity:0}}}}"
+                  f".{cls}{{opacity:0;animation:{cls} {secs:.1f}s steps(1,end) infinite}}.{cls}0{{opacity:1}}")
+    for k in range(1, n):
+        cv.css.append(f".{cls}{k}{{animation-delay:{-(secs - k * secs / n):.2f}s}}")
+
+
+def sup_line(cv: B.Canvas, x: float, y: float, s: str, size: float = 12, fam: str = "PM", wt: int = 500,
+             col: str = "text", anchor: str = "start") -> float:
+    """Text with each ^digits raised as an exponent, so x^4 draws as x with a superscript 4."""
+    small = round(size * 0.68, 1)
+    parts = [p for p in re.split(r"(\^\d+)", s) if p]
+    total = sum(B.width(p[1:], small, fam, wt) if p[0] == "^" else B.width(p, size, fam, wt) for p in parts)
+    x -= total / 2 if anchor == "middle" else total if anchor == "end" else 0
+    for p in parts:
+        if p[0] == "^":
+            cv.put(x, y - size * 0.42, p[1:], small, fam, wt, col)
+            x += B.width(p[1:], small, fam, wt)
+            continue
+        body = p.lstrip()
+        if body.strip():
+            cv.put(x + B.width(p[:len(p) - len(body)], size, fam, wt), y, body.rstrip(), size, fam, wt, col)
+        x += B.width(p, size, fam, wt)
+    return x
+
+
+def poly_text(coeffs: str) -> str:
+    """GF(2) coefficients, highest power first, as a polynomial: '10011' is 'x^4 + x + 1'."""
+    d = len(coeffs) - 1
+    terms = ["1" if d - k == 0 else "x" if d - k == 1 else f"x^{d - k}" for k, b in enumerate(coeffs) if b == "1"]
+    return " + ".join(terms)
+
+
+def x_period(p: int, deg: int) -> int:
+    """The order of x modulo the GF(2) polynomial p of degree deg, bit i holding x^i; 0 if x never returns to 1."""
+    if not p & 1:
+        return 0
+    r = 1
+    for k in range(1, 2 ** deg + 1):
+        r <<= 1
+        if r >> deg & 1:
+            r ^= p
+        if r == 1:
+            return k
+    return 0
+
+
+def tick(cv: B.Canvas, x: float, y: float, col: str = "green"):
+    cv.add(f'<path d="M{x:.1f},{y - 3.5:.1f} l2.6,2.8 l5.2,-6" fill="none" stroke="{cv.c[col]}" stroke-width="1.6" '
+           f'stroke-linecap="round" stroke-linejoin="round"/>')
+
+
+def arrow(cv: B.Canvas, x1: float, y1: float, x2: float, y2: float, col: str = "text3"):
+    """A straight connector with a small open head at its end."""
+    c = cv.c[col]
+    cv.add(f'<path d="M{x1:.1f},{y1:.1f} L{x2:.1f},{y2:.1f}" stroke="{c}" stroke-width="1.2" fill="none"/>')
+    if x1 == x2:
+        s = 1 if y2 > y1 else -1
+        cv.add(f'<path d="M{x2 - 3:.1f},{y2 - 4 * s:.1f} L{x2:.1f},{y2:.1f} L{x2 + 3:.1f},{y2 - 4 * s:.1f}" '
+               f'stroke="{c}" stroke-width="1.2" fill="none"/>')
+    else:
+        s = 1 if x2 > x1 else -1
+        cv.add(f'<path d="M{x2 - 4 * s:.1f},{y2 - 3:.1f} L{x2:.1f},{y2:.1f} L{x2 - 4 * s:.1f},{y2 + 3:.1f}" '
+               f'stroke="{c}" stroke-width="1.2" fill="none"/>')
+
+
+def galois_states(n: int, seed: str, poly: str) -> list[str]:
+    """Every state a Galois register visits from seed, by state[i] <= (state[n-1] & poly[i]) ^ state[i-1].
+
+    Bit strings are written most significant bit first, as Verilog writes them.
+    """
+    s = [int(b) for b in reversed(seed)]
+    p = [int(b) for b in reversed(poly)]
+    seen, out = set(), []
+    while tuple(s) not in seen:
+        seen.add(tuple(s))
+        out.append("".join(map(str, reversed(s))))
+        top = s[n - 1]
+        s = [(top & p[i]) ^ (s[i - 1] if i else 0) for i in range(n)]
+    need("".join(map(str, reversed(s))) == seed, "lfsr motif: the register never returns to its seed")
+    return out
+
+
+def motif_lfsr(cv: B.Canvas, spec, files) -> str:
+    """The register from the testbench, its taps, and the cycle of states it runs through."""
+    c = cv.c
+    tb_path, rtl_path = spec["files"][0], spec["files"][1]
+    tb, rtl = files[tb_path], files[rtl_path]
+    name = spec["name"]
+    m = re.search(r"parameter\s+conn_poly_length\s*=\s*(\d+)", tb)
+    need(m, f"{name}: {tb_path} no longer sets conn_poly_length")
+    n = int(m.group(1))
+    ms = re.search(r"initial_value_lfsr_galois\s*=\s*(\d+)'b([01]+)", tb)
+    mp = re.search(r"\bconn_poly\s*=\s*(\d+)'b([01]+)", tb)
+    need(ms and mp, f"{name}: {tb_path} no longer drives a seed and a connection polynomial")
+    seed, poly = ms.group(2), mp.group(2)
+    need(len(seed) == len(poly) == n, f"{name}: seed {seed} and polynomial {poly} are not {n} bits")
+    need(re.search(r"state_lfsr_galois\s*\[conn_poly_length - 1\]\s*&\s*conn_poly\s*\[i\]", rtl)
+         and re.search(r"\^\s*data_out_d_ff_lfsr_galois\s*\[i - 1\]", rtl)
+         and re.search(r"data_out_d_ff_lfsr_galois\s*\[-1\]\s*=\s*0", rtl),
+         f"{name}: {rtl_path} no longer has the update this picture simulates")
+    states = galois_states(n, seed, poly)
+    k = len(states)
+    need(k <= 16, f"{name}: {k} states do not fit the panel")
+    panel(cv, tb_path.rsplit("/", 1)[-1], f"period {k}")
+
+    # The register, most significant stage on the left. Stage i takes stage
+    # i-1 on its right, XORed with the feedback where poly[i] is 1.
+    # Spread the stages across the panel: the feedback loop needs 14 on the
+    # left and 18 on the right, and the panel keeps an 18 margin on each side.
+    cell, yc = 30, PY + 60
+    room = PW - 36 - 32
+    gap = min(40, (room - n * cell) / max(n - 1, 1))
+    x0 = PX + 32 + (room - n * cell - (n - 1) * gap) / 2
+    xs = [x0 + j * (cell + gap) for j in range(n)]
+    yf = PY + 46
+    xr = xs[-1] + cell + 18
+    left = xs[0] - 14
+    cv.add(f'<path d="M{xs[0]:.1f},{yc + cell / 2} H{left:.1f} V{yf} H{xr:.1f} V{yc + cell / 2} H{xs[-1] + cell + 4:.1f}" '
+           f'fill="none" stroke="{c["violet"]}" stroke-width="1.3"/>')
+    cv.add(f'<path d="M{xs[-1] + cell + 8:.1f},{yc + cell / 2 - 3} L{xs[-1] + cell + 4:.1f},{yc + cell / 2} '
+           f'L{xs[-1] + cell + 8:.1f},{yc + cell / 2 + 3}" fill="none" stroke="{c["violet"]}" stroke-width="1.3"/>')
+    for j in range(n - 1):
+        bit = n - 1 - j                      # the stage on the left of this gap
+        gx = xs[j] + cell + gap / 2
+        cy = yc + cell / 2
+        if poly[n - 1 - bit] == "1":
+            cv.add(f'<path d="M{gx:.1f},{yf} V{cy - 6}" stroke="{c["violet"]}" stroke-width="1.3"/>')
+            cv.add(f'<circle cx="{gx:.1f}" cy="{cy}" r="6" fill="{c["bg"]}" stroke="{c["violet"]}" stroke-width="1.3"/>'
+                   f'<path d="M{gx - 4:.1f},{cy} H{gx + 4:.1f} M{gx:.1f},{cy - 4} V{cy + 4}" stroke="{c["violet"]}" stroke-width="1.3"/>')
+            arrow(cv, xs[j + 1], cy, gx + 6, cy)
+            arrow(cv, gx - 6, cy, xs[j] + cell, cy)
+        else:
+            arrow(cv, xs[j + 1], cy, xs[j] + cell, cy)
+    for j in range(n):
+        cv.put(xs[j] + cell / 2, yc + cell + 13, f"s{n - 1 - j}", 9, "PM", 500, "text3", "middle")
+    beat = 0.75
+    for t, st in enumerate(states):
+        cv.add(f'<g class="lv lv{t}">')
+        for j in range(n):
+            on = st[j] == "1"
+            cv.add(f'<rect x="{xs[j]:.1f}" y="{yc}" width="{cell}" height="{cell}" rx="5" fill="{c["cyan"] if on else c["bg2"]}" '
+                   f'fill-opacity="{0.2 if on else 0.7}" stroke="{c["cyan"] if on else c["border"]}"/>')
+            cv.put(xs[j] + cell / 2, yc + cell / 2 + 4.5, st[j], 13, "PM", 600, "text", "middle")
+        cv.add("</g>")
+    cycler(cv, "lv", k, k * beat)
+
+    # The cycle, written out, with a marker on the state the register holds.
+    per_row = min(k, 8)
+    sw = (PW - 36) / per_row
+    y1 = PY + 124
+    slots = []
+    for t, st in enumerate(states):
+        r, col = divmod(t, per_row)
+        x, y = PX + 18 + col * sw + sw / 2, y1 + r * 20
+        slots.append((x, y))
+        cv.put(x, y, st, 10.5, "PM", 500, "text2", "middle")
+    x_0, y_0 = slots[0]
+    cv.add(f'<rect class="lm" x="{x_0 - sw / 2 + 2:.1f}" y="{y_0 - 12:.1f}" width="{sw - 4:.1f}" height="17" rx="4" '
+           f'fill="{c["cyan"]}" fill-opacity="0.16" stroke="{c["cyan"]}" stroke-opacity="0.5"/>')
+    stepper(cv, "lm", [(x - x_0, y - y_0) for x, y in slots], k * beat)
+    full = 2 ** n - 1
+    yb = PY + PH - 14
+    sup_line(cv, PX + 18, yb, "P(x) = " + poly_text("1" + poly), 11, "PM", 500, "text")
+    cv.put(PX + PW - 18, yb, f"{k} of {full} states", 10.5, "PS", 400, "text3", "end")
+    return (f"The panel shows the {n}-stage Galois register from {tb_path.rsplit('/', 1)[-1]}, seeded with {seed} "
+            f"under connection polynomial {poly}, so P(x) = {poly_text('1' + poly)}, stepping through its {k} states {', '.join(states)} before it returns to the seed; "
+            f"a primitive polynomial of degree {n} would give {full}.")
+
+
+def motif_polys(cv: B.Canvas, spec, files) -> str:
+    """The candidates the polynomial array holds, each with the period of x modulo it."""
+    c = cv.c
+    path = spec["files"][0]
+    sv = files[path]
+    name = spec["name"]
+    m = re.search(r"parameter\s+polynomial_order\s*=\s*(\d+)", sv)
+    need(m, f"{name}: {path} no longer sets polynomial_order")
+    deg = int(m.group(1))
+    need(re.search(r"address_width_polynomial_array\s*=\s*polynomial_order\s*-\s*1", sv)
+         and re.search(r"start_value\s*=\s*2\s*\*\*\s*polynomial_order\s*\+\s*1", sv),
+         f"{name}: {path} no longer sizes and starts the array the way this picture assumes")
+    ms = re.search(r"temp_start_value\s*=\s*temp_start_value\s*\+\s*(\d+)", sv)
+    need(ms, f"{name}: {path} no longer steps through the candidates")
+    count, start, step = 2 ** (deg - 1), 2 ** deg + 1, int(ms.group(1))
+    vals = [start + step * i for i in range(count)]
+    need(vals[-1] < 2 ** (deg + 1), f"{name}: the candidates overflow degree {deg}")
+    need(count <= 8, f"{name}: {count} candidates do not fit the panel")
+    full = 2 ** deg - 1
+    rows = [(format(v, f"0{deg + 1}b"), x_period(v, deg)) for v in vals]
+    prim = [b for b, per in rows if per == full]
+    panel(cv, path.rsplit("/", 1)[-1], f"degree {deg}")
+    per_col = (count + 1) // 2
+    colw = (PW - 36 - 14) / 2
+    lh, y0 = 23, PY + 56
+    slots = []
+    for i, (bits, per) in enumerate(rows):
+        col, r = divmod(i, per_col)
+        x, y = PX + 18 + col * (colw + 14), y0 + r * lh
+        slots.append((x, y))
+        hit = per == full
+        cv.put(x + 4, y, bits, 11.5, "PM", 600, "cyan" if hit else "text2")
+        bx, bw = x + 52, 62
+        cv.add(f'<rect x="{bx}" y="{y - 7}" width="{bw}" height="6" rx="3" fill="{c["bg2"]}" stroke="{c["border"]}" stroke-width="0.6"/>')
+        cv.add(f'<rect x="{bx}" y="{y - 7}" width="{bw * per / full:.1f}" height="6" rx="3" fill="{c["cyan"] if hit else c["text3"]}" '
+               f'fill-opacity="{1 if hit else 0.55}"/>')
+        cv.put(bx + bw + 8, y, str(per), 10.5, "PM", 500, "text" if hit else "text3")
+        if hit:
+            tick(cv, bx + bw + 28, y - 0.5, "green")
+    x_0, y_0 = slots[0]
+    cv.add(f'<rect class="pa" x="{x_0 - 2:.1f}" y="{y_0 - 14:.1f}" width="{colw + 4:.1f}" height="20" rx="5" '
+           f'fill="{c["cyan"]}" fill-opacity="0.10" stroke="{c["cyan"]}" stroke-opacity="0.35"/>')
+    stepper(cv, "pa", [(x - x_0, y - y_0) for x, y in slots], count * 0.7)
+    yb = PY + PH - 34
+    cv.put(PX + 18, yb, "primitive:", 10.5, "PS", 400, "text3")
+    x = PX + 18 + B.width("primitive: ", 10.5, "PS", 400)
+    for j, b in enumerate(prim):
+        x = sup_line(cv, x, yb, poly_text(b), 11, "PM", 500, "text")
+        if j < len(prim) - 1:
+            cv.put(x, yb, ",", 11, "PM", 500, "text3")
+            x += B.width(",  ", 11, "PM", 500)
+    sup_line(cv, PX + 18, yb + 18, f"x returns to 1 after 2^{deg} − 1 = {full} steps", 10.5, "PS", 400, "text3")
+    return (f"The panel lists the {count} candidates of degree {deg} that {path.rsplit('/', 1)[-1]} holds, "
+            + ", ".join(f"{b} with period {per}" for b, per in rows)
+            + f"; {len(prim)} of them, {', '.join(prim)}, reach the full period {full} and are primitive.")
+
+
+def motif_binary(cv: B.Canvas, spec, files) -> str:
+    """The worked binary number from the first module, and the modules written so far."""
+    c = cv.c
+    readme, doc_path = files["README.md"], spec["files"][1]
+    doc = files[doc_path]
+    name = spec["name"]
+    m = re.search(r"binary number `([01]+)` means", doc)
+    need(m, f"{name}: {doc_path} no longer works a binary number")
+    bits = m.group(1)
+    mv = re.search(r"^= (\d+)\s*$", doc[m.end():], re.M)
+    need(mv and int(mv.group(1)) == int(bits, 2), f"{name}: {doc_path} no longer gives the value of {bits}")
+    value = int(bits, 2)
+    rows = md_table(readme, ["Topic", "Document", "Status"], f"{name} README.md")
+    status = [plain(r[2]).strip() for r in rows]
+    need(set(status) <= {"Written", "Planned"}, f"{name} README.md: a status other than Written or Planned")
+    written = status.count("Written")
+    nxt = next((plain(r[0]) for r, s in zip(rows, status) if s == "Planned"), None)
+    panel(cv, doc_path.rsplit("/", 1)[-1], "base 2")
+    nb = len(bits)
+    cell, gap = 30, 6
+    x0 = PX + (PW - (nb * cell + (nb - 1) * gap)) / 2
+    yc = PY + 60
+    ones = [i for i, b in enumerate(bits) if b == "1"]
+    for i, b in enumerate(bits):
+        x = x0 + i * (cell + gap)
+        cv.put(x + cell / 2, PY + 52, str(2 ** (nb - 1 - i)), 9.5, "PM", 500, "text3", "middle")
+        on = b == "1"
+        cv.add(f'<rect x="{x:.1f}" y="{yc}" width="{cell}" height="{cell}" rx="5" fill="{c["cyan"] if on else c["bg2"]}" '
+               f'fill-opacity="{0.18 if on else 0.7}" stroke="{c["cyan"] if on else c["border"]}"/>')
+        cv.put(x + cell / 2, yc + 20, b, 14, "PM", 600, "text" if on else "text3", "middle")
+    # The sum builds up one set bit at a time, a ring on the bit being added.
+    terms = [str(2 ** (nb - 1 - i)) for i in ones]
+    beat = 0.9
+    steps = len(ones) + 1
+    for t in range(steps):
+        shown = " + ".join(terms[:t + 1]) if t < len(ones) else " + ".join(terms) + f" = {value}"
+        cv.add(f'<g class="bs bs{t}">')
+        cv.put(PX + PW / 2, PY + 114, shown, 12, "PM", 600 if t == len(ones) else 500,
+               "text" if t == len(ones) else "text2", "middle")
+        if t < len(ones):
+            x = x0 + ones[t] * (cell + gap)
+            cv.add(f'<rect x="{x - 3:.1f}" y="{yc - 3}" width="{cell + 6}" height="{cell + 6}" rx="7" fill="none" '
+                   f'stroke="{c["cyan"]}" stroke-width="1.6"/>')
+        cv.add("</g>")
+    cycler(cv, "bs", steps, steps * beat)
+    cv.add(f'<line x1="{PX + 18}" y1="{PY + 130}" x2="{PX + PW - 18}" y2="{PY + 130}" stroke="{c["border"]}" stroke-dasharray="2 3"/>')
+    n = len(rows)
+    dx = (PW - 60) / (n - 1)
+    yd = PY + 156
+    cv.add(f'<line x1="{PX + 30}" y1="{yd}" x2="{PX + 30 + dx * (n - 1):.1f}" y2="{yd}" stroke="{c["border"]}" stroke-width="2"/>')
+    if written > 1:
+        cv.add(f'<line x1="{PX + 30}" y1="{yd}" x2="{PX + 30 + dx * (written - 1):.1f}" y2="{yd}" stroke="{c["green"]}" stroke-width="2"/>')
+    for i, s in enumerate(status):
+        x = PX + 30 + dx * i
+        if s == "Written":
+            cv.add(f'<circle cx="{x:.1f}" cy="{yd}" r="6" fill="{c["green"]}"/>')
+        else:
+            cv.add(f'<circle cx="{x:.1f}" cy="{yd}" r="5" fill="{c["bg"]}" stroke="{c["text3"]}" stroke-width="1.4"/>')
+    cap = f"{written} of {n} modules written" + (f", next: {nxt}" if nxt else "")
+    cv.put(PX + 18, PY + PH - 14, cap, 10.5, "PS", 400, "text3")
+    return (f"The panel works the binary number {bits} from {doc_path.rsplit('/', 1)[-1]}, adding the weights of its "
+            f"set bits, {' + '.join(terms)}, to reach {value}, above a row of {n} modules of which {written} are written.")
+
+
+def motif_markdown(cv: B.Canvas, spec, files) -> str:
+    """A Markdown file's first heading as typed and as GitHub renders it."""
+    c = cv.c
+    path = spec["files"][0]
+    first = next((l for l in files[path].splitlines() if l.strip()), "")
+    m = re.match(r"(#{1,6})\s+(.+)$", first)
+    need(m, f'{spec["name"]}: {path} no longer opens with a heading')
+    hashes, text = m.group(1), m.group(2).strip()
+    panel(cv, path, "Markdown")
+    cv.put(PX + 18, PY + 52, "source", 9.5, "PM", 500, "text3", spacing=1)
+    end = tokens_line(cv, PX + 18, PY + 76, [(hashes, "violet"), (" " + text, "text")], 12.5, 500)
+    cv.add(f'<rect class="cur" x="{end + 2:.1f}" y="{PY + 64}" width="7" height="15" fill="{c["cyan"]}" fill-opacity="0.8"/>')
+    cv.css.append("@keyframes blink{0%,55%{opacity:1}56%,100%{opacity:0}}.cur{animation:blink 1.1s steps(1,end) infinite}")
+    cv.add(f'<line x1="{PX + 18}" y1="{PY + 96}" x2="{PX + PW - 18}" y2="{PY + 96}" stroke="{c["border"]}" stroke-dasharray="2 3"/>')
+    cv.put(PX + 18, PY + 118, "rendered", 9.5, "PM", 500, "text3", spacing=1)
+    size = {1: 24, 2: 20, 3: 17}.get(len(hashes), 15)
+    while B.width(text, size, "PS", 600) > PW - 36:
+        size -= 1
+    cv.put(PX + 18, PY + 148, text, size, "PS", 600, "text")
+    if len(hashes) <= 2:
+        cv.add(f'<line x1="{PX + 18}" y1="{PY + 160}" x2="{PX + PW - 18}" y2="{PY + 160}" stroke="{c["border"]}"/>')
+    level = len(hashes)
+    cv.put(PX + 18, PY + PH - 14, f"{hashes} opens a level-{level} heading", 10.5, "PS", 400, "text3")
+    return (f'The panel shows the first line of {path}, "{first}", as typed and as GitHub renders it, '
+            f"a level-{level} heading.")
+
+
+def device(cv: B.Canvas, x: float, y: float, w: float, h: float, r: float, label: str, k: int, screen_pad: float,
+           label_y: float | None = None):
+    """One device outline with a page of text on its screen; y is the bottom of the body,
+    and label_y the baseline of its name where something hangs below the body."""
+    c = cv.c
+    top = y - h
+    cv.add(f'<rect x="{x:.1f}" y="{top:.1f}" width="{w:.1f}" height="{h:.1f}" rx="{r}" fill="{c["bg2"]}" '
+           f'fill-opacity="0.8" stroke="{c["text3"]}" stroke-width="1.3"/>')
+    sx, sy, sw, sh = x + screen_pad, top + screen_pad, w - 2 * screen_pad, h - 2 * screen_pad
+    cv.add(f'<rect x="{sx:.1f}" y="{sy:.1f}" width="{sw:.1f}" height="{sh:.1f}" rx="{max(r - 3, 2)}" fill="{c["bg"]}"/>')
+    lines = max(3, int((sh - 14) / 9))
+    cv.add(f'<rect x="{sx + 5:.1f}" y="{sy + 6:.1f}" width="{sw * 0.55:.1f}" height="4" rx="2" fill="{c["text2"]}"/>')
+    for j in range(lines - 1):
+        lw = sw - 10 if j % 3 != 2 else (sw - 10) * 0.7
+        yy = sy + 16 + j * 9
+        if yy + 3 > sy + sh - 4:
+            break
+        hl = j == 1
+        cv.add(f'<rect x="{sx + 5:.1f}" y="{yy:.1f}" width="{lw:.1f}" height="3" rx="1.5" '
+               f'fill="{c["cyan"] if hl else c["line"]}"/>')
+    cv.add(f'<g class="dv dv{k}"><rect x="{x - 3:.1f}" y="{top - 3:.1f}" width="{w + 6:.1f}" height="{h + 6:.1f}" '
+           f'rx="{r + 3}" fill="none" stroke="{c["cyan"]}" stroke-width="1.6"/></g>')
+    cv.put(x + w / 2, label_y if label_y is not None else y + 16, label, 10.5, "PM", 500, "text2", "middle")
+
+
+def motif_devices(cv: B.Canvas, spec, files) -> str:
+    """A desktop, a tablet and a phone side by side, each showing a page of text.
+
+    The list supplies every word: "devices" names the three, "require" the
+    words the README must still say, "panel_title", "panel_note" (or
+    "note_from", a word whose presence in the README becomes the note),
+    "caption" and "alt".
+    """
+    c = cv.c
+    name = spec["name"]
+    readme = files[spec["files"][0]]
+    for word in spec.get("require", []):
+        need(re.search(rf"\b{re.escape(word)}\b", readme), f"{name} README.md no longer names {word}")
+    labels = spec["devices"]
+    need(len(labels) == 3, f"{name}: the devices motif draws three devices")
+    note = spec.get("note_from") if spec.get("note_from") and spec["note_from"] in readme else spec.get("panel_note", "")
+    panel(cv, spec.get("panel_title", "devices"), note)
+    base = PY + 152
+    mx, mw, mh = PX + 24, 150, 96
+    device(cv, mx, base - 10, mw, mh, 6, labels[0], 0, 5, label_y=base + 16)   # below the stand
+    cv.add(f'<path d="M{mx + mw / 2 - 14:.1f},{base - 10} L{mx + mw / 2 - 20:.1f},{base} H{mx + mw / 2 + 20:.1f} '
+           f'L{mx + mw / 2 + 14:.1f},{base - 10}" fill="{c["bg2"]}" stroke="{c["text3"]}" stroke-width="1.3"/>')
+    device(cv, PX + 196, base, 80, 106, 8, labels[1], 1, 6)
+    device(cv, PX + 296, base, 44, 86, 9, labels[2], 2, 4)
+    cycler(cv, "dv", 3, 3 * 1.4)
+    if spec.get("caption"):
+        cv.put(PX + 18, PY + PH - 14, spec["caption"], 10.5, "PS", 400, "text3")
+    return spec.get("alt") or f"The panel shows {labels[0]}, {labels[1]} and {labels[2]} side by side, each showing a page of text."
+
+
+def motif_browser(cv: B.Canvas, spec, files) -> str:
+    """The site's address, its top-level sections and the versions its package.json asks for."""
+    c = cv.c
+    name = spec["name"]
+    nav = re.findall(r"^    label: '([^']+)'", files[spec["files"][1]], re.M)
+    need(len(nav) >= 3, f"{name}: {spec['files'][1]} no longer lists its top-level sections")
+    pkg = json.loads(files["package.json"])
+    deps = {**pkg.get("devDependencies", {}), **pkg.get("dependencies", {})}
+    want = spec["packages"]
+    need(all(p in deps for p in want), f"{name}: package.json lacks one of {want}")
+    panel(cv, "", "")
+    pill_w = PW - 120
+    px0 = PX + 54
+    cv.add(f'<rect x="{px0}" y="{PY + 9}" width="{pill_w}" height="16" rx="8" fill="{c["bg2"]}" stroke="{c["border"]}"/>')
+    cv.add(f'<path d="M{px0 + 10},{PY + 17} m-3,-1 v4 h6 v-4 z M{px0 + 8},{PY + 16} v-2 a2,2 0 0 1 4,0 v2" '
+           f'fill="none" stroke="{c["text3"]}" stroke-width="1"/>')
+    cv.put(px0 + 20, PY + 21, spec["url"], 10.5, "PM", 500, "text2")
+    x = PX + 18
+    spots = []
+    for k, label in enumerate(nav):
+        w = B.width(label, 11, "PS", 600)
+        cv.put(x, PY + 56, label, 11, "PS", 600, "text2")
+        spots.append((x, w))
+        x += w + 16
+    need(x - 16 <= PX + PW - 18, f"{name}: the section names overflow the panel")
+    for k, (sx, w) in enumerate(spots):
+        cv.add(f'<g class="nv nv{k}"><rect x="{sx:.1f}" y="{PY + 62}" width="{w:.1f}" height="2.5" rx="1.2" fill="{c["cyan"]}"/></g>')
+    cycler(cv, "nv", len(spots), len(spots) * 1.1)
+    cv.add(f'<line x1="{PX}" y1="{PY + 72}" x2="{PX + PW}" y2="{PY + 72}" stroke="{c["border"]}"/>')
+    cv.put(PX + 18, PY + 90, "package.json", 9.5, "PM", 500, "text3", spacing=1)
+    for k, p in enumerate(want):
+        tokens_line(cv, PX + 26, PY + 108 + k * 15, [(f'"{p}"', "cyan"), (": ", "text3"),
+                                                    (f'"{deps[p]}"', "green"), ("," if k < len(want) - 1 else "", "text3")], 10.5)
+    scripts = pkg.get("scripts", {})
+    if spec.get("deploy") in scripts:
+        cv.put(PX + 18, PY + PH - 12, f"pnpm {spec['deploy']}", 10.5, "PM", 500, "text2")
+        cv.put(PX + PW - 18, PY + PH - 12, spec.get("deploy_note", ""), 10.5, "PS", 400, "text3", "end")
+    return (f"The panel shows a browser at {spec['url']} with its sections, {', '.join(nav)}, and the versions "
+            f"package.json asks for: " + ", ".join(f"{p} {deps[p]}" for p in want) + ".")
+
+
+def folder_icon(cv: B.Canvas, x: float, y: float, col: str):
+    c = cv.c[col]
+    cv.add(f'<path d="M{x},{y - 8} h4.5 l1.5,1.6 h6 v7.4 h-12 z" fill="{c}" fill-opacity="0.25" stroke="{c}" stroke-width="1"/>')
+
+
+def motif_folders(cv: B.Canvas, spec, files) -> str:
+    """Top-level folders from the list, and the submodules .gitmodules registers."""
+    c = cv.c
+    subs = re.findall(r'^\[submodule "([^"]+)"\]', files[".gitmodules"], re.M)
+    need(subs, f'{spec["name"]}: .gitmodules registers no submodules')
+    folders = spec["folders"]
+    panel(cv, spec["display"], f"{len(subs)} submodules")
+    lh, y0 = 22, PY + 56
+    slots = []
+    for k, (folder, note) in enumerate(folders):
+        y = y0 + k * lh
+        slots.append(y)
+        folder_icon(cv, PX + 20, y, "cyan" if k == 0 else "violet" if folder.startswith(".") else "orange")
+        cv.put(PX + 40, y, folder + "/", 11, "PM", 500, "text")
+        cv.put(PX + PW - 18, y, note, 10.5, "PS", 400, "text3", "end")
+        need(PX + 40 + B.width(folder + "/", 11, "PM", 500) + 10 < PX + PW - 18 - B.width(note, 10.5, "PS", 400),
+             f'{spec["name"]}: "{folder}" and its note overlap')
+    need(y0 + (len(folders) - 1) * lh < PY + PH - 26, f'{spec["name"]}: too many folders for the panel')
+    cv.add(f'<rect class="fh" x="{PX + 12}" y="{slots[0] - 15:.1f}" width="{PW - 24}" height="21" rx="5" '
+           f'fill="{c["cyan"]}" fill-opacity="0.10"/>')
+    stepper(cv, "fh", [(0, y - slots[0]) for y in slots], len(slots) * 1.0)
+    cv.put(PX + 18, PY + PH - 12, f"{len(subs)} submodules, each with its own repository and remote", 10.5, "PS", 400, "text3")
+    return (f"The panel lists the top-level folders, " + ", ".join(f for f, _ in folders)
+            + f", and the {len(subs)} submodules .gitmodules registers.")
+
+
+def motif_steps(cv: B.Canvas, spec, files) -> str:
+    """The stages of a method from the list, top to bottom, with a marker walking down them."""
+    c = cv.c
+    steps = spec["steps"]
+    need(2 <= len(steps) <= 5, f'{spec["name"]}: the method needs two to five steps')
+    panel(cv, spec.get("panel_title", "method"), spec.get("panel_note", ""))
+    lh = min(34, (PH - 46) / len(steps))
+    bh = lh - 13                      # leaves a gap the arrow fits inside
+    y0 = PY + 42
+    bw = PW - 36
+    for k, (title, note) in enumerate(steps):
+        y = y0 + k * lh
+        cv.add(f'<rect x="{PX + 18}" y="{y:.1f}" width="{bw}" height="{bh:.1f}" rx="6" fill="{c["bg2"]}" '
+               f'fill-opacity="0.7" stroke="{c["border"]}"/>')
+        cv.put(PX + 30, y + bh / 2 + 4, title, 11, "PM", 600, "cyan")
+        cv.put(PX + PW - 30, y + bh / 2 + 4, note, 10.5, "PS", 400, "text2", "end")
+        need(PX + 30 + B.width(title, 11, "PM", 600) + 12 < PX + PW - 30 - B.width(note, 10.5, "PS", 400),
+             f'{spec["name"]}: step "{title}" and its note overlap')
+        if k < len(steps) - 1:
+            arrow(cv, PX + 48, y + bh + 2, PX + 48, y + lh - 2)
+    cv.add(f'<rect class="sm" x="{PX + 15}" y="{y0 - 3:.1f}" width="{bw + 6}" height="{bh + 6:.1f}" rx="8" fill="none" '
+           f'stroke="{c["cyan"]}" stroke-width="1.6"/>')
+    stepper(cv, "sm", [(0, k * lh) for k in range(len(steps))], len(steps) * 1.2)
+    return "The panel shows the method in " + str(len(steps)) + " steps: " + "; ".join(f"{t}, {n}" for t, n in steps) + "."
+
+
 MOTIFS = {"staff": motif_staff, "tree": motif_tree, "editor": motif_editor, "brew": motif_brew,
-          "parity": motif_parity, "setup": motif_setup}
+          "parity": motif_parity, "setup": motif_setup, "lfsr": motif_lfsr, "polys": motif_polys,
+          "binary": motif_binary, "markdown": motif_markdown, "devices": motif_devices,
+          "browser": motif_browser, "folders": motif_folders, "steps": motif_steps}
 
 
 def banner(mode: str, spec: dict, node: dict, files: dict) -> B.Canvas:
-    desc = (node.get("description") or "").strip()
+    # A list may word the description itself, where the repository's own
+    # setting is empty or reads badly on a banner.
+    desc = (spec.get("description") or node.get("description") or "").strip()
     need(desc, f'{spec["name"]}: the repository has no description')
     cv = B.Canvas(W, H, mode, spec["display"], "")
     frame(cv, W, H)
@@ -555,15 +1051,18 @@ def banner(mode: str, spec: dict, node: dict, files: dict) -> B.Canvas:
         items.append((None, node["licenseInfo"]["spdxId"]))
     if node.get("primaryLanguage"):
         items.append((None, node["primaryLanguage"]["name"]))
-    commits = node["defaultBranchRef"]["target"]["history"]["totalCount"]
-    items.append((None, f"{B.fmt_int(commits)} commit" + ("" if commits == 1 else "s")))
+    for tag in spec.get("chips", []):
+        items.append((None, tag))
+    if not CFG.get("static"):
+        commits = node["defaultBranchRef"]["target"]["history"]["totalCount"]
+        items.append((None, f"{B.fmt_int(commits)} commit" + ("" if commits == 1 else "s")))
     if node["stargazerCount"] > 0:
         items.append(("star", B.fmt_int(node["stargazerCount"])))
     shown = chips(cv, 44, 198, items, TEXT_W + 44)
 
     said = MOTIFS[spec["motif"]](cv, spec, files)
     close(cv, W, H)
-    cv.desc = f'{spec["display"]}: {desc} {", ".join(shown)}. {said}'
+    cv.desc = f'{spec["display"]}: {desc} ' + (f'{", ".join(shown)}. ' if shown else "") + said
     return cv
 
 
@@ -799,7 +1298,13 @@ CHARTS = {"speed": chart_speed, "compare": chart_compare, "coverage": chart_cove
 # --------------------------------------------------------------------------
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    global CFG
+    ap = argparse.ArgumentParser(description="Draw the banners and charts for other repositories' READMEs.")
+    ap.add_argument("--config", default=str(DEFAULT_CFG), help="the list of repositories (default build/repos.json)")
+    ap.add_argument("--out", help="write DIR/<name>/<card>-<mode>.svg instead of dist/repo-<name>-<card>-<mode>.svg")
+    args = ap.parse_args(argv)
+    CFG = json.loads(Path(args.config).read_text(encoding="utf-8"))
     token = os.environ.get("GITHUB_TOKEN")
     if not token:
         print("GITHUB_TOKEN is not set", file=sys.stderr)
@@ -809,18 +1314,20 @@ def main() -> int:
         made = {}
         for spec in CFG["repos"]:
             node, files = got[spec["name"]]
-            base = f'repo-{spec["name"].lower()}'
+            base = f'{spec["name"]}/' if args.out else f'repo-{spec["name"].lower()}-'
             for mode in B.MODES:
-                made[f"{base}-banner-{mode}.svg"] = banner(mode, spec, node, files).render()
-                for ch in spec["charts"]:
-                    made[f"{base}-{ch}-{mode}.svg"] = CHARTS[ch](mode, spec, node, files).render()
+                made[f"{base}banner-{mode}.svg"] = banner(mode, spec, node, files).render()
+                for ch in spec.get("charts", []):
+                    made[f"{base}{ch}-{mode}.svg"] = CHARTS[ch](mode, spec, node, files).render()
     except Drift as e:
         print(f"repos.py: {e}", file=sys.stderr)
         return 1
-    B.DIST.mkdir(exist_ok=True)
+    out = Path(args.out) if args.out else B.DIST
     for name, svg in made.items():
-        (B.DIST / name).write_text(svg, encoding="utf-8")
-    print(f"wrote {len(made)} SVGs to dist/, {sum(map(len, made.values())) / 1024:.0f} KiB in all")
+        dest = out / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(svg, encoding="utf-8")
+    print(f"wrote {len(made)} SVGs to {args.out or 'dist/'}, {sum(map(len, made.values())) / 1024:.0f} KiB in all")
     return 0
 
 
