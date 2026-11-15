@@ -1,0 +1,60 @@
+{
+  "login": "anirbanchakraborty-dev",
+  "site": "https://dranirbanchakraborty.com",
+  "feed": "https://dranirbanchakraborty.com/feed.xml",
+  "assets": "https://raw.githubusercontent.com/anirbanchakraborty-dev/anirbanchakraborty-dev/output/",
+  "hero": {
+    "eyebrow": "ENGINEER · RESEARCHER · EDUCATOR",
+    "name": "Dr. Anirban Chakraborty",
+    "lines": [
+      "CPU Microcode Engineer at Intel",
+      "Ph.D. in Electrical Engineering · Editor in Chief, ASIR"
+    ]
+  },
+  "now": [
+    "Writing Error Correction Coding, {count:Error Correction Coding} chapters published so far",
+    "Building Swara, a LilyPond toolkit for Neovim in Rust and Lua",
+    "Designing Yantra, a 32-bit CPU built from first principles",
+    "Writing Computer Architecture, {count:Computer Architecture} chapters published so far",
+    "Maintaining ACH-NEOVIM, a Neovim setup with every language's tools"
+  ],
+  "links": [
+    {"id": "website", "label": "Website", "icon": "globe", "url": "https://dranirbanchakraborty.com/"},
+    {"id": "linkedin", "label": "LinkedIn", "icon": "briefcase", "url": "https://www.linkedin.com/in/dr-anirban-chakraborty/"},
+    {"id": "scholar", "label": "Google Scholar", "icon": "cap", "url": "https://scholar.google.com/citations?user=j2OEqZUAAAAJ&hl=en"},
+    {"id": "researchgate", "label": "ResearchGate", "icon": "paper", "url": "https://www.researchgate.net/profile/Anirban-Chakraborty-19"},
+    {"id": "rss", "label": "RSS", "icon": "rss", "url": "https://dranirbanchakraborty.com/feed.xml"},
+    {"id": "contact", "label": "Contact", "icon": "mail", "url": "https://dranirbanchakraborty.com/contact"}
+  ],
+  "projects": [
+    {"repo": "swara", "accent": "orange", "motif": "staff"},
+    {"repo": "ecc-book-lab", "accent": "bright", "motif": "parity"},
+    {"repo": "ACH-NEOVIM", "accent": "violet", "motif": "prompt"},
+    {"repo": "Yantra-CPU", "accent": "cyan", "motif": "chip", "tag": "cpu · rv32 · education", "language": "Design phase"},
+    {"repo": "tree-sitter-lilypond", "accent": "green", "motif": "tree"},
+    {"repo": "Post-Mac-Setup", "accent": "red", "motif": "layers"}
+  ],
+  "lang_accent": {
+    "Rust": "orange",
+    "Python": "bright",
+    "Lua": "violet",
+    "Shell": "green",
+    "JavaScript": "cyan",
+    "SystemVerilog": "red"
+  },
+  "books": [
+    {"category": "Computer Architecture", "title": "Computer Architecture", "url": "https://dranirbanchakraborty.com/learn/computer-architecture", "accent": "cyan", "motif": "pipeline", "kind": "BOOK", "unit": "chapters"},
+    {"category": "The Hardware Interview", "title": "The Hardware Interview", "url": "https://dranirbanchakraborty.com/learn/hardware-interview-prep", "accent": "green", "motif": "timing", "kind": "BOOK", "unit": "chapters"},
+    {"category": "Post-Quantum Cryptography from First Principles", "title": "Post-Quantum Cryptography from First Principles", "url": "https://dranirbanchakraborty.com/learn/post-quantum-cryptography", "accent": "violet", "motif": "lattice", "kind": "BOOK", "unit": "chapters"},
+    {"category": "Error Correction Coding", "title": "Error Correction Coding", "url": "https://dranirbanchakraborty.com/learn/error-correction-coding", "accent": "bright", "motif": "parity", "kind": "BOOK", "unit": "chapters"},
+    {"category": "The Nikon Z6III Guide", "title": "The Nikon Z6III Guide", "url": "https://dranirbanchakraborty.com/photography/z6iii", "accent": "orange", "motif": "aperture", "kind": "FIELD GUIDE", "unit": "chapters"}
+  ],
+  "toolbox": [
+    {"group": "Hardware description", "items": ["SystemVerilog", "Verilog", "VHDL", "UVM", "SystemC", "SPICE"]},
+    {"group": "Design and verification", "items": ["RTL design", "Logic synthesis", "Timing analysis", "Formal verification", "Testbench development", "Gate-level simulation", "Lint", "Physical design", "45nm and 28nm CMOS"]},
+    {"group": "EDA", "items": ["Synopsys DC", "PrimeTime", "VCS", "Verdi", "Spyglass", "JasperGold", "Virtuoso", "Vivado", "Quartus", "ModelSim"]},
+    {"group": "Open-source flow", "items": ["Verilator", "Yosys", "cocotb", "Tree-sitter", "Neovim"]},
+    {"group": "Languages", "items": ["Python", "Rust", "C", "Lua", "Tcl", "Bash", "TypeScript", "SQL", "R", "MATLAB"]},
+    {"group": "Domains", "items": ["CPU microarchitecture", "Error correction coding", "Cryptographic hardware", "Finite-field arithmetic", "FPGA design", "ASIC design", "Low-power design", "SoC architecture", "DSP", "Reconfigurable computing"]}
+  ]
+}
