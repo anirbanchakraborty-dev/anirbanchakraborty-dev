@@ -1013,7 +1013,7 @@ def motif_steps(cv: B.Canvas, spec, files) -> str:
     cv.add(f'<rect class="sm" x="{PX + 15}" y="{y0 - 3:.1f}" width="{bw + 6}" height="{bh + 6:.1f}" rx="8" fill="none" '
            f'stroke="{c["cyan"]}" stroke-width="1.6"/>')
     stepper(cv, "sm", [(0, k * lh) for k in range(len(steps))], len(steps) * 1.2)
-    return "The panel shows the method in " + str(len(steps)) + " steps: " + "; ".join(f"{t}, {n}" for t, n in steps) + "."
+    return f'The panel shows the {spec.get("panel_title", "method")} in {len(steps)} steps: ' + "; ".join(f"{t}, {n}" for t, n in steps) + "."
 
 
 MOTIFS = {"staff": motif_staff, "tree": motif_tree, "editor": motif_editor, "brew": motif_brew,
