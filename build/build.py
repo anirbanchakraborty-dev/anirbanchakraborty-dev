@@ -770,6 +770,16 @@ def book_cover(mode: str, b: dict, count: int) -> Canvas:
 # Stats, languages, activity
 
 
+SINGULAR = {"contributions": "contribution", "public commits": "public commit", "pull requests": "pull request",
+            "issues": "issue", "public repositories": "public repository", "stars earned": "star earned"}
+
+
+def count_phrase(v: str, label: str) -> str:
+    """'1 issue' rather than '1 issues' in the sentence a screen reader hears."""
+    k = label.lower()
+    return f"{v} {SINGULAR.get(k, k) if v == '1' else k}"
+
+
 def stats_card(mode: str, a: dict) -> Canvas:
     tiles = [
         (fmt_int(a["total"]), "Contributions"),
@@ -780,7 +790,7 @@ def stats_card(mode: str, a: dict) -> Canvas:
         (fmt_int(a["stars"]), "Stars earned"),
     ]
     cv = Canvas(420, 214, mode, "GitHub at a glance",
-                "Last 12 months: " + ", ".join(f"{v} {k.lower()}" for v, k in tiles) + ".")
+                "Last 12 months: " + ", ".join(count_phrase(v, k) for v, k in tiles) + ".")
     c = cv.c
     card_frame(cv)
     cv.put(20, 34, "GitHub at a glance", 15, "PS", 600, "text")
@@ -847,7 +857,7 @@ def activity_card(mode: str, a: dict) -> Canvas:
     c = cv.c
     card_frame(cv)
     cv.put(20, 34, "Weekly contributions", 15, "PS", 600, "text")
-    cv.put(20, 54, f"Last 52 weeks · {fmt_int(a['total'])} contributions · as of {fmt_date(a['today'])}",
+    cv.put(20, 54, f"Last {len(weeks)} weeks · {fmt_int(a['total'])} contributions · as of {fmt_date(a['today'])}",
            11, "PM", 400, "text3")
     X0, X1, Y0, Y1 = 64, 836, 84, 210
     vals = [v for _, v in weeks]
@@ -1012,6 +1022,11 @@ def blocks(a: dict) -> dict[str, str]:
         '<p align="center">\n'
         f'{picture("snake", "The contribution calendar, eaten by a snake.")}\n'
         "</p>")
+
+    # Written from profile.json, so the text a screen reader hears always
+    # holds every group and item the card draws.
+    out["toolbox"] = picture("toolbox", "Toolbox. " + " ".join(
+        f'{g["group"]}: {", ".join(g["items"])}.' for g in CFG["toolbox"]), "100%")
 
     out["prs"] = "\n".join(
         f'- [{p["repository"]["nameWithOwner"]}#{p["number"]}]({p["url"]}): {md_text(p["title"])}'

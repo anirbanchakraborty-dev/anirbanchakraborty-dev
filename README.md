@@ -90,7 +90,9 @@ Free to read on [dranirbanchakraborty.com](https://dranirbanchakraborty.com/). F
 
 ### Toolbox
 
-<picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/anirbanchakraborty-dev/anirbanchakraborty-dev/output/toolbox-dark.svg"><img alt="Toolbox. Hardware description: SystemVerilog, Verilog, VHDL, UVM, SystemC, SPICE. Design and verification: RTL design, synthesis, timing analysis, formal verification, testbenches, gate-level simulation, lint, physical design. EDA: Synopsys and Cadence flows, Vivado, Quartus, ModelSim. Open source: Verilator, Yosys, cocotb, Tree-sitter, Neovim. Languages: Python, Rust, C, Lua, Tcl, Bash, TypeScript, SQL, R, MATLAB." src="https://raw.githubusercontent.com/anirbanchakraborty-dev/anirbanchakraborty-dev/output/toolbox-light.svg" width="100%"></picture>
+<!-- toolbox:start -->
+<picture><source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/anirbanchakraborty-dev/anirbanchakraborty-dev/output/toolbox-dark.svg"><img alt="Toolbox. Hardware description: SystemVerilog, Verilog, VHDL, UVM, SystemC, SPICE. Design and verification: RTL design, Logic synthesis, Timing analysis, Formal verification, Testbench development, Gate-level simulation, Lint, Physical design, 45nm and 28nm CMOS. EDA: Synopsys DC, PrimeTime, VCS, Verdi, Spyglass, JasperGold, Virtuoso, Vivado, Quartus, ModelSim. Open-source flow: Verilator, Yosys, cocotb, Tree-sitter, Neovim. Languages: Python, Rust, C, Lua, Tcl, Bash, TypeScript, SQL, R, MATLAB. Domains: CPU microarchitecture, Error correction coding, Cryptographic hardware, Finite-field arithmetic, FPGA design, ASIC design, Low-power design, SoC architecture, DSP, Reconfigurable computing." src="https://raw.githubusercontent.com/anirbanchakraborty-dev/anirbanchakraborty-dev/output/toolbox-light.svg" width="100%"></picture>
+<!-- toolbox:end -->
 
 ### Research
 

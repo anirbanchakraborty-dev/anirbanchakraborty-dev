@@ -30,7 +30,7 @@
     {"repo": "swara", "accent": "orange", "motif": "staff"},
     {"repo": "ecc-book-lab", "accent": "bright", "motif": "parity"},
     {"repo": "ACH-NEOVIM", "accent": "violet", "motif": "prompt"},
-    {"repo": "Yantra-CPU", "accent": "cyan", "motif": "chip", "tag": "cpu · rv32 · education", "language": "Design phase"},
+    {"repo": "Yantra-CPU", "accent": "cyan", "motif": "chip", "tag": "cpu · 32-bit · education", "language": "Design phase"},
     {"repo": "tree-sitter-lilypond", "accent": "green", "motif": "tree"},
     {"repo": "Post-Mac-Setup", "accent": "red", "motif": "layers"}
   ],
