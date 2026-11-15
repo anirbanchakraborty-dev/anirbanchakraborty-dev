@@ -309,8 +309,11 @@ def analyse(user: dict, feed: list[dict]) -> dict:
     days = [(dt.date.fromisoformat(d["date"]), d["contributionCount"])
             for w in cal["weeks"] for d in w["contributionDays"]]
     days.sort()
+    # Each week keeps its day count. The calendar's first and last weeks are
+    # usually partial, and the chart draws those apart from the full ones.
     weeks = [(dt.date.fromisoformat(w["contributionDays"][0]["date"]),
-              sum(d["contributionCount"] for d in w["contributionDays"])) for w in cal["weeks"]]
+              sum(d["contributionCount"] for d in w["contributionDays"]),
+              len(w["contributionDays"])) for w in cal["weeks"] if w["contributionDays"]]
 
     longest = run = 0
     best_end = None
@@ -852,15 +855,18 @@ def nice_step(top: float, ticks: int = 3) -> float:
 
 def activity_card(mode: str, a: dict) -> Canvas:
     weeks = a["weeks"]
+    days = a["days"]
+    first_day, last_day = (days[0][0], days[-1][0]) if days else (a["today"], a["today"])
     cv = Canvas(860, 316, mode, "Weekly contributions",
-                f"Contributions per week over the last year, {fmt_int(a['total'])} in all.")
+                f"Contributions per week from {fmt_date(first_day)} to {fmt_date(last_day)}, "
+                f"{fmt_int(a['total'])} in all.")
     c = cv.c
     card_frame(cv)
     cv.put(20, 34, "Weekly contributions", 15, "PS", 600, "text")
-    cv.put(20, 54, f"Last {len(weeks)} weeks · {fmt_int(a['total'])} contributions · as of {fmt_date(a['today'])}",
+    cv.put(20, 54, f"{fmt_date(first_day)} to {fmt_date(last_day)} · {fmt_int(a['total'])} contributions",
            11, "PM", 400, "text3")
     X0, X1, Y0, Y1 = 64, 836, 84, 210
-    vals = [v for _, v in weeks]
+    vals = [v for _, v, _ in weeks]
     step = nice_step(max(vals) if vals else 1)
     ymax = step * math.ceil(max(max(vals, default=1), 1) / step)
     for k in range(int(round(ymax / step)) + 1):
@@ -872,13 +878,28 @@ def activity_card(mode: str, a: dict) -> Canvas:
     n = len(vals)
     xs = [X0 + (X1 - X0) * i / max(n - 1, 1) for i in range(n)]
     ys = [Y1 - (Y1 - Y0) * v / ymax for v in vals]
-    line = "M" + "L".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
-    area = line + f"L{xs[-1]:.1f},{Y1}L{xs[0]:.1f},{Y1}Z"
+    # A week the calendar holds only part of is drawn apart from the full ones:
+    # a dashed run out to a hollow point, so a week that has barely begun does
+    # not read as a week in which activity collapsed. Only the two ends of the
+    # calendar can be partial.
+    full = [i for i in range(n) if weeks[i][2] == 7]
+    lo, hi = (full[0], full[-1]) if full else (0, n - 1)
+    partial = [i for i in range(n) if not lo <= i <= hi]
+    pts = lambda idx: "L".join(f"{xs[i]:.1f},{ys[i]:.1f}" for i in idx)
+    line = "M" + pts(range(lo, hi + 1))
+    area = line + f"L{xs[hi]:.1f},{Y1}L{xs[lo]:.1f},{Y1}Z"
     cv.defs.append(f'<linearGradient id="a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{c["mark"]}" '
                    f'stop-opacity="0.32"/><stop offset="1" stop-color="{c["mark"]}" stop-opacity="0"/></linearGradient>')
     cv.add(f'<path d="{area}" fill="url(#a)"/>')
+    for i in partial:
+        j = lo if i < lo else hi
+        cv.add(f'<path d="M{pts([j, i])}" fill="none" stroke="{c["mark"]}" stroke-width="2" '
+               f'stroke-dasharray="3 4" stroke-linecap="round"/>')
     cv.add(f'<path d="{line}" fill="none" stroke="{c["mark"]}" stroke-width="2" '
            f'stroke-linejoin="round" stroke-linecap="round"/>')
+    for i in partial:
+        cv.add(f'<circle cx="{xs[i]:.1f}" cy="{ys[i]:.1f}" r="4" fill="{c["bg"]}" stroke="{c["mark"]}" '
+               f'stroke-width="2"/>')
     # A short bright dash runs along the line and back out of sight. At the
     # first frame it sits before the start of the path, so nothing is hidden
     # and nothing extra is drawn when a renderer shows that frame alone.
@@ -889,7 +910,7 @@ def activity_card(mode: str, a: dict) -> Canvas:
                   ".pl{animation:pl 9s cubic-bezier(.4,0,.3,1) 0.6s infinite}")
     # Month ticks.
     last_x = -99
-    for i, (d, _) in enumerate(weeks):
+    for i, (d, _, _) in enumerate(weeks):
         mid = d + dt.timedelta(days=3)
         prev = weeks[i - 1][0] + dt.timedelta(days=3) if i else None
         if prev is None or mid.month != prev.month:
@@ -897,8 +918,14 @@ def activity_card(mode: str, a: dict) -> Canvas:
                 cv.put(xs[i], Y1 + 20, f"{mid:%b}", 10, "PM", 400, "text3", "middle")
                 last_x = xs[i]
     # Peak week, labelled directly.
+    if partial:
+        key = "Partial week"
+        kw = width(key, 10, "PM", 400)
+        cv.add(f'<circle cx="{X1 - kw - 10:.1f}" cy="50.5" r="3.5" fill="{c["bg"]}" stroke="{c["mark"]}" '
+               f'stroke-width="1.75"/>')
+        cv.put(X1, 54, key, 10, "PM", 400, "text3", "end")
     if vals:
-        pk = max(range(n), key=lambda i: vals[i])
+        pk = max(range(lo, hi + 1), key=lambda i: vals[i])
         px, py = xs[pk], ys[pk]
         # A ring that swells out of the peak marker. It is transparent until its
         # first run, so the marker reads the same in a still frame.
